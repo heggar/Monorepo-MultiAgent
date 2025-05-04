@@ -1,0 +1,46 @@
+# ---------- 1. Builder stage -------------------------------------------------
+FROM python:3.13-slim AS builder
+
+# Instalamos Poetry sin entorno virtual adicional
+ENV POETRY_VERSION=1.8.2 \
+    POETRY_HOME=/opt/poetry \
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_CACHE_DIR=/opt/poetry-cache \
+    PATH="$POETRY_HOME/bin:$PATH"
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl && \
+    export PATH="$POETRY_HOME/bin:$PATH" && \
+    curl -sSL https://install.python-poetry.org | python3 - && \
+    poetry --version && \
+    apt-get purge -y curl && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copiamos sólo los archivos de dependencias primero (mejora la caché)
+WORKDIR /app
+
+# Copiar archivos de dependencias
+COPY apps/fastapi_backend/pyproject.toml apps/fastapi_backend/poetry.lock* ./
+
+# Instala dependencias (sin las de desarrollo)
+RUN /opt/poetry/bin/poetry install --no-root --no-dev --no-interaction --no-ansi
+
+# ---------- 2. Runtime stage -------------------------------------------------
+FROM python:3.12-slim
+
+# Copiamos las dependencias ya instaladas desde builder
+COPY --from=builder /usr/local /usr/local
+COPY --from=builder /opt/poetry-cache /opt/poetry-cache
+
+# (Opcional) fije un usuario no root por seguridad
+RUN useradd -m appuser
+USER appuser
+
+# Copiar todo el código del backend
+# Asegúrate de que esto se haga DESPUÉS de instalar dependencias
+COPY apps/fastapi_backend /app
+
+EXPOSE 8000
+
+# Comando para ejecutar la API (Uvicorn)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

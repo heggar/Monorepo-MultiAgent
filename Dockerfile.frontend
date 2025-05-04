@@ -1,0 +1,96 @@
+# Dockerfile.frontend
+
+# --- Etapa Base ---
+# Define la imagen base: Node.js v18 sobre Alpine Linux (ligero)
+# Alpine es una distribución Linux mínima, lo que ayuda a mantener
+# el tamaño final de la imagen Docker lo más pequeño posible.
+FROM node:18-alpine AS base
+
+# --- Etapa de Dependencias (deps) ---
+# Esta etapa se enfoca únicamente en instalar las dependencias de Node.js.
+# Se separa para aprovechar el sistema de caché de capas de Docker.
+# Si los archivos package.json o package-lock.json no cambian,
+# esta capa se reutilizará de la caché en compilaciones posteriores,
+# acelerando significativamente el proceso.
+FROM base AS deps
+# Instala un paquete de compatibilidad para libc. Alpine usa musl libc,
+# pero algunas dependencias de Node.js pueden esperar glibc.
+RUN apk add --no-cache libc6-compat
+# Establece el directorio de trabajo predeterminado dentro del contenedor.
+# Todos los comandos siguientes se ejecutarán en este directorio.
+WORKDIR /app
+
+# Copia los archivos que definen las dependencias del proyecto frontend.
+# El '*' en package-lock.json* asegura que funcione con npm, yarn o pnpm.
+COPY apps/nextjs-frontend/package.json apps/nextjs-frontend/package-lock.json* ./
+# Copia el package.json de la raíz del monorepo. Es importante si el
+# frontend depende de workspaces definidos en la raíz.
+COPY package.json ./root-package.json
+
+# Ejecuta el comando para instalar las dependencias definidas en package.json.
+# Utiliza las versiones exactas especificadas en package-lock.json para
+# asegurar compilaciones reproducibles.
+RUN npm install
+
+# --- Etapa de Compilación (builder) ---
+# Esta etapa se encarga de compilar la aplicación Next.js para producción.
+FROM base AS builder
+WORKDIR /app
+# Copia las dependencias ya instaladas desde la etapa 'deps'.
+# Esto evita tener que reinstalarlas.
+COPY --from=deps /app/node_modules ./node_modules
+# Copia todo el código fuente de la aplicación frontend al contenedor.
+COPY apps/nextjs-frontend ./
+
+# Ejecuta el script 'build' definido en el package.json del frontend.
+# Este comando típicamente ejecuta 'next build', que genera
+# los archivos optimizados para producción en la carpeta .next.
+RUN npm run build
+
+# --- Etapa Final de Ejecución (runner) ---
+# Esta es la etapa final que crea la imagen que se ejecutará en producción.
+# Es una imagen optimizada que solo contiene lo estrictamente necesario.
+FROM base AS runner
+WORKDIR /app
+
+# Establece la variable de entorno NODE_ENV a 'production'.
+# Esto le indica a Next.js y otras librerías que se ejecuten en modo optimizado.
+ENV NODE_ENV production
+# Deshabilitar la telemetría de Next.js es opcional, puede reducir
+# ligeramente el ruido en los logs o el tráfico de red saliente.
+# ENV NEXT_TELEMETRY_DISABLED 1
+
+# Crea un grupo de sistema y un usuario de sistema no-root.
+# Ejecutar la aplicación como un usuario no privilegiado es una
+# práctica de seguridad recomendada para contenedores.
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copia los artefactos de compilación necesarios desde la etapa 'builder'.
+# Solo se copia lo necesario para ejecutar la aplicación, no el código fuente original
+# ni las dependencias de desarrollo.
+COPY --from=builder /app/public ./public 
+# Copia la aplicación compilada (.next) y asigna la propiedad al usuario 'nextjs'.
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+# Copia las dependencias de producción (node_modules).
+COPY --from=builder /app/node_modules ./node_modules
+# Copia el package.json (necesario para ejecutar el comando 'npm start').
+COPY --from=builder /app/package.json ./package.json
+
+# Cambia el usuario activo del contenedor al usuario no-root 'nextjs'.
+# Los comandos siguientes se ejecutarán como este usuario.
+USER nextjs
+
+# Informa a Docker que el contenedor escuchará en el puerto 3000.
+# Esto es principalmente documentación; la publicación real del puerto
+# se hace en docker-compose.yml o con 'docker run -p'.
+EXPOSE 3000
+
+# Establece la variable de entorno PORT. Next.js la usa para saber
+# en qué puerto debe iniciar el servidor.
+ENV PORT 3000
+
+# Define el comando por defecto que se ejecutará cuando se inicie el contenedor.
+# Ejecuta el script 'start' del package.json, que normalmente es 'next start',
+# iniciando el servidor de producción optimizado de Next.js.
+CMD ["npm", "start"]

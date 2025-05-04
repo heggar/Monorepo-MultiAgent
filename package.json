@@ -1,0 +1,19 @@
+{
+  "name": "monorepo-multiagent",
+  "version": "1.0.0",
+  "description": "Aplicación web full-stack multiagente",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev -w apps/nextjs-frontend",
+    "dev:backend": "npm run dev -w apps/fastapi_backend"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "lucide-react": "^0.507.0"
+  }
+}

@@ -1,0 +1,42 @@
+graph LR
+    subgraph "Cliente (Navegador)"
+        A[Next.js Frontend]
+    end
+
+    subgraph "Infraestructura Backend"
+        B(API FastAPI - REST)
+        C(API FastAPI - WebSocket)
+        D(Worker ARQ)
+        E((Redis ARQ Queue / PubSub / Control & Feedback Flags))
+        F((PostgreSQL DB Sesiones / Historial / Estado Agentes))
+        G["AutoGen Workflow (GroupChats / Teams) - Tareas Largas - Tareas Tiempo Real"]
+    end
+
+    style E fill:#f9f,stroke:#333,stroke-width:2px
+    style F fill:#ccf,stroke:#333,stroke-width:2px
+    style G fill:#cfc,stroke:#333,stroke-width:2px
+
+    %% Flujos Principales
+    A -- HTTP API Calls (Crear/Controlar Sesión) --> B
+    A -- WebSocket Connection --> C
+    A -- Fetch Estado Inicial (REST) --> B
+
+    %% Flujo Tareas Largas (ARQ Worker)
+    B -- Enqueue Job (Iniciar/Reanudar Tarea Larga) --> E -- ARQ Queue --> D
+    D -- Gestiona Ciclo de Vida Tarea Larga --> G
+    G -- Genera Mensajes/Resultados Tarea Larga --> D
+    D -- Guarda/Carga Estado Agentes e Historial (Checkpoints) --> F
+    D -- Publica Updates (Logs, Estado, Mensajes) --> E -- Pub/Sub Channel --> C
+
+    %% Flujo Tareas Tiempo Real (Directo FastAPI)
+    C -- Interacción Tiempo Real (Input/Output) --> G
+    G -- Respuesta Tiempo Real --> C
+
+    %% Flujo Control y Feedback (Clarificado)
+    A -- Envía Feedback/Input (vía REST) --> B
+    A -- Envía Feedback/Input (vía WS) --> C
+    B -- Señal Control (Pausa) / Guarda Feedback --> E -- Control/Feedback Flags --> D
+    C -- Reenvía Updates (Incl. Solicitud Feedback) --> A
+    D -- Lee Flags Control (Pausa/Cancel) & Feedback --> E
+    D -- Solicita Feedback Usuario --> E -- Pub/Sub (Solicitud Feedback) --> C
+    D -- Provee Feedback a --> G

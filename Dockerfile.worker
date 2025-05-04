@@ -1,0 +1,24 @@
+# Dockerfile.worker
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Instalar Poetry (igual que en backend)
+ENV POETRY_HOME="/opt/poetry"
+RUN curl -sSL https://install.python-poetry.org | python3 - --version 1.7.1
+ENV PATH="$POETRY_HOME/bin:$PATH"
+RUN echo $PATH
+# RUN which poetry
+RUN poetry config virtualenvs.create false
+
+# Copiar archivos de dependencias
+COPY apps/fastapi_backend/pyproject.toml apps/fastapi_backend/poetry.lock* ./
+
+# Instalar dependencias (solo producción)
+RUN poetry install --no-dev --no-interaction --no-ansi
+
+# Copiar todo el código del backend (el worker necesita acceso a la app)
+COPY apps/fastapi_backend /app
+
+# Comando para ejecutar el worker ARQ
+CMD ["arq", "app.worker.settings.WorkerSettings"]
